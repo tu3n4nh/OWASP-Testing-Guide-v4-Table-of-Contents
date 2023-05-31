@@ -3714,3 +3714,4 @@ XSS
 
 Có đầy đủ quyền truy cập cơ sở dữ liệu chứa thông tin riêng tư của người dùng.
 
+   
